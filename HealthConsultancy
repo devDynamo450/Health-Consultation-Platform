@@ -1,0 +1,547 @@
+package HospitalManagementSystem;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Scanner;
+
+public class Doctor {
+    private Connection connection;
+
+    public Doctor(Connection connection){
+        this.connection = connection;
+    }
+
+    public void viewDoctors(){
+        String query = "select * from doctors";
+        try{
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            System.out.println("Doctors: ");
+            System.out.println("+------------+--------------------+------------------+");
+            System.out.println("| Doctor Id  | Name               | Specialization   |");
+            System.out.println("+------------+--------------------+------------------+");
+            while(resultSet.next()){
+                int id = resultSet.getInt("id");
+                String name = resultSet.getString("name");
+                String specialization = resultSet.getString("specialization");
+                System.out.printf("| %-10s | %-18s | %-16s |\n", id, name, specialization);
+                System.out.println("+------------+--------------------+------------------+");
+            }
+
+        }catch (SQLException e){
+            e.printStackTrace();
+        }
+    }
+
+    public boolean getDoctorById(int id){
+        String query = "SELECT * FROM doctors WHERE id = ?";
+        try{
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setInt(1, id);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if(resultSet.next()){
+                return true;
+            }else{
+                return false;
+            }
+        }catch (SQLException e){
+            e.printStackTrace();
+        }
+        return false;
+    }
+}
+package HospitalManagementSystem;
+
+import java.sql.*;
+import java.util.Scanner;
+
+public class Patient {
+    private Connection connection;
+    private Scanner scanner;
+
+    public Patient(Connection connection, Scanner scanner){
+        this.connection = connection;
+        this.scanner = scanner;
+    }
+
+    public void addPatient(){
+        System.out.print("Enter Patient Name: ");
+        String name = scanner.next();
+        System.out.print("Enter Patient Age: ");
+        int age = scanner.nextInt();
+        System.out.print("Enter Patient Gender: ");
+        String gender = scanner.next();
+
+        try{
+            String query = "INSERT INTO patients(name, age, gender) VALUES(?, ?, ?)";
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setString(1, name);
+            preparedStatement.setInt(2, age);
+            preparedStatement.setString(3, gender);
+            int affectedRows = preparedStatement.executeUpdate();
+            if(affectedRows>0){
+                System.out.println("Patient Added Successfully!!");
+            }else{
+                System.out.println("Failed to add Patient!!");
+            }
+
+        }catch (SQLException e){
+            e.printStackTrace();
+        }
+    }
+
+    public void viewPatients(){
+        String query = "select * from patients";
+        try{
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            System.out.println("Patients: ");
+            System.out.println("+------------+--------------------+----------+------------+");
+            System.out.println("| Patient Id | Name               | Age      | Gender     |");
+            System.out.println("+------------+--------------------+----------+------------+");
+            while(resultSet.next()){
+                int id = resultSet.getInt("id");
+                String name = resultSet.getString("name");
+                int age = resultSet.getInt("age");
+                String gender = resultSet.getString("gender");
+                System.out.printf("| %-10s | %-18s | %-8s | %-10s |\n", id, name, age, gender);
+                System.out.println("+------------+--------------------+----------+------------+");
+            }
+
+        }catch (SQLException e){
+            e.printStackTrace();
+        }
+    }
+
+    public boolean getPatientById(int id){
+        String query = "SELECT * FROM patients WHERE id = ?";
+        try{
+            PreparedStatement preparedStatement = connection.prepareStatement(query);
+            preparedStatement.setInt(1, id);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            if(resultSet.next()){
+                return true;
+            }else{
+                return false;
+            }
+        }catch (SQLException e){
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+}
+package HospitalManagementSystem;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.sql.*;
+import java.util.Vector;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * HospitalManagementGUI
+ *
+ * - A Swing GUI wrapper for the hospital system that performs database operations
+ *   on a dedicated thread pool to avoid blocking the Event Dispatch Thread (EDT).
+ * - Uses the same DB connection details as your console application; adjust if needed.
+ *
+ * Usage:
+ *  - Run this class (it will create its own DB connection).
+ *  - It will not modify your existing console-based classes.
+ *
+ * Note: This class directly queries the DB to display lists (patients, doctors, appointments).
+ * It uses prepared statements and closes resources properly.
+ */
+public class HospitalManagementGUI extends JFrame {
+    private static final String url = "jdbc:mysql://localhost:3306/hospital";
+    private static final String username = "root";
+    private static final String password = "Ni@131006";
+
+    private final ExecutorService dbExecutor;
+    private Connection connection;
+
+    private final JButton btnAddPatient = new JButton("Add Patient");
+    private final JButton btnViewPatients = new JButton("View Patients");
+    private final JButton btnViewDoctors = new JButton("View Doctors");
+    private final JButton btnBookAppointment = new JButton("Book Appointment");
+    private final JButton btnViewAppointments = new JButton("View Appointments");
+    private final JTextArea logArea = new JTextArea(12, 60);
+    private final JTable table = new JTable();
+
+    public HospitalManagementGUI() {
+        super("Hospital Management System - GUI");
+
+        // Create a fixed thread pool for DB tasks
+        dbExecutor = Executors.newFixedThreadPool(4);
+
+        initUI();
+        initDB();
+        attachActions();
+
+        // On close, cleanup
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                shutdown();
+                dispose();
+            }
+        });
+
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        pack();
+        setLocationRelativeTo(null);
+        setVisible(true);
+    }
+
+    private void initUI() {
+        JPanel content = new JPanel(new BorderLayout(10, 10));
+        content.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        // Top buttons
+        JPanel topButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 8));
+        topButtons.add(btnAddPatient);
+        topButtons.add(btnViewPatients);
+        topButtons.add(btnViewDoctors);
+        topButtons.add(btnBookAppointment);
+        topButtons.add(btnViewAppointments);
+        content.add(topButtons, BorderLayout.NORTH);
+
+        // Center: table inside scroll pane
+        table.setFillsViewportHeight(true);
+        JScrollPane tableScroll = new JScrollPane(table);
+        tableScroll.setPreferredSize(new Dimension(800, 260));
+        content.add(tableScroll, BorderLayout.CENTER);
+
+        // Bottom: log area
+        logArea.setEditable(false);
+        JScrollPane logScroll = new JScrollPane(logArea);
+        logScroll.setPreferredSize(new Dimension(800, 160));
+        content.add(logScroll, BorderLayout.SOUTH);
+
+        setContentPane(content);
+    }
+
+    private void initDB() {
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            connection = DriverManager.getConnection(url, username, password);
+            appendLog("Connected to database.");
+        } catch (Exception e) {
+            appendLog("DB connection failed: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Database connection failed:\n" + e.getMessage(),
+                    "DB Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void attachActions() {
+        btnAddPatient.addActionListener(e -> addPatientGui());
+        btnViewPatients.addActionListener(e -> loadPatients());
+        btnViewDoctors.addActionListener(e -> loadDoctors());
+        btnBookAppointment.addActionListener(e -> bookAppointmentGui());
+        btnViewAppointments.addActionListener(e -> loadAppointments());
+    }
+
+    private void addPatientGui() {
+        // Show input dialogs for basic patient fields. Adapt to your DB schema.
+        JTextField tfName = new JTextField();
+        JTextField tfAge = new JTextField();
+        JTextField tfGender = new JTextField();
+
+        Object[] form = {
+                "Name:", tfName,
+                "Age:", tfAge,
+                "Gender:", tfGender
+        };
+
+        int res = JOptionPane.showConfirmDialog(this, form, "Add Patient", JOptionPane.OK_CANCEL_OPTION);
+        if (res != JOptionPane.OK_OPTION) return;
+
+        String name = tfName.getText().trim();
+        String ageText = tfAge.getText().trim();
+        String gender = tfGender.getText().trim();
+
+        if (name.isEmpty() || ageText.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Name and age are required.", "Input Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        int age;
+        try {
+            age = Integer.parseInt(ageText);
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Age must be a number.", "Input Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // Run DB insert on executor
+        dbExecutor.submit(() -> {
+            String insert = "INSERT INTO patients(name, age, gender) VALUES(?, ?, ?)";
+            try (PreparedStatement ps = connection.prepareStatement(insert)) {
+                ps.setString(1, name);
+                ps.setInt(2, age);
+                ps.setString(3, gender.isEmpty() ? null : gender);
+                int rows = ps.executeUpdate();
+                SwingUtilities.invokeLater(() -> {
+                    if (rows > 0) {
+                        appendLog("Patient added: " + name);
+                        loadPatients(); // refresh view
+                    } else {
+                        appendLog("Failed to add patient: " + name);
+                        JOptionPane.showMessageDialog(this, "Failed to add patient.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                });
+            } catch (SQLException ex) {
+                SwingUtilities.invokeLater(() -> {
+                    appendLog("Error adding patient: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(this, "Error adding patient:\n" + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        });
+    }
+
+    private void loadPatients() {
+        appendLog("Loading patients...");
+        // Use SwingWorker for DB -> UI pattern
+        new SwingWorker<DefaultTableModel, Void>() {
+            @Override
+            protected DefaultTableModel doInBackground() throws Exception {
+                String query = "SELECT id, name, age, gender FROM patients";
+                try (PreparedStatement ps = connection.prepareStatement(query);
+                     ResultSet rs = ps.executeQuery()) {
+                    return resultSetToTableModel(rs);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    DefaultTableModel model = get();
+                    table.setModel(model);
+                    appendLog("Patients loaded: " + model.getRowCount());
+                } catch (Exception ex) {
+                    appendLog("Failed to load patients: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(HospitalManagementGUI.this, "Failed to load patients:\n" + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void loadDoctors() {
+        appendLog("Loading doctors...");
+        new SwingWorker<DefaultTableModel, Void>() {
+            @Override
+            protected DefaultTableModel doInBackground() throws Exception {
+                String query = "SELECT id, name, specialization FROM doctors";
+                try (PreparedStatement ps = connection.prepareStatement(query);
+                     ResultSet rs = ps.executeQuery()) {
+                    return resultSetToTableModel(rs);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    DefaultTableModel model = get();
+                    table.setModel(model);
+                    appendLog("Doctors loaded: " + model.getRowCount());
+                } catch (Exception ex) {
+                    appendLog("Failed to load doctors: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(HospitalManagementGUI.this, "Failed to load doctors:\n" + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void loadAppointments() {
+        appendLog("Loading appointments...");
+        new SwingWorker<DefaultTableModel, Void>() {
+            @Override
+            protected DefaultTableModel doInBackground() throws Exception {
+                String query = "SELECT a.id, p.name AS patient, d.name AS doctor, a.appointment_date " +
+                        "FROM appointments a " +
+                        "LEFT JOIN patients p ON a.patient_id = p.id " +
+                        "LEFT JOIN doctors d ON a.doctor_id = d.id " +
+                        "ORDER BY a.appointment_date DESC";
+                try (PreparedStatement ps = connection.prepareStatement(query);
+                     ResultSet rs = ps.executeQuery()) {
+                    return resultSetToTableModel(rs);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    DefaultTableModel model = get();
+                    table.setModel(model);
+                    appendLog("Appointments loaded: " + model.getRowCount());
+                } catch (Exception ex) {
+                    appendLog("Failed to load appointments: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(HospitalManagementGUI.this, "Failed to load appointments:\n" + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void bookAppointmentGui() {
+        JTextField tfPatientId = new JTextField();
+        JTextField tfDoctorId = new JTextField();
+        JTextField tfDate = new JTextField("YYYY-MM-DD");
+
+        Object[] form = {
+                "Patient ID:", tfPatientId,
+                "Doctor ID:", tfDoctorId,
+                "Appointment Date (YYYY-MM-DD):", tfDate
+        };
+
+        int res = JOptionPane.showConfirmDialog(this, form, "Book Appointment", JOptionPane.OK_CANCEL_OPTION);
+        if (res != JOptionPane.OK_OPTION) return;
+
+        String pidText = tfPatientId.getText().trim();
+        String didText = tfDoctorId.getText().trim();
+        String date = tfDate.getText().trim();
+
+        if (pidText.isEmpty() || didText.isEmpty() || date.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "All fields are required.", "Input Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        int pid, did;
+        try {
+            pid = Integer.parseInt(pidText);
+            did = Integer.parseInt(didText);
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "IDs must be numbers.", "Input Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        // Perform checks and insert on background thread
+        dbExecutor.submit(() -> {
+            try {
+                if (!existsInTable("patients", pid)) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Patient ID not found.", "Not Found", JOptionPane.WARNING_MESSAGE));
+                    appendLog("Attempted booking with invalid patient id: " + pid);
+                    return;
+                }
+                if (!existsInTable("doctors", did)) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Doctor ID not found.", "Not Found", JOptionPane.WARNING_MESSAGE));
+                    appendLog("Attempted booking with invalid doctor id: " + did);
+                    return;
+                }
+                if (!isDoctorAvailable(did, date)) {
+                    SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Doctor not available on " + date, "Unavailable", JOptionPane.INFORMATION_MESSAGE));
+                    appendLog("Doctor not available on " + date + " (doctor id " + did + ")");
+                    return;
+                }
+
+                String insert = "INSERT INTO appointments(patient_id, doctor_id, appointment_date) VALUES (?, ?, ?)";
+                try (PreparedStatement ps = connection.prepareStatement(insert)) {
+                    ps.setInt(1, pid);
+                    ps.setInt(2, did);
+                    ps.setString(3, date);
+                    int rows = ps.executeUpdate();
+                    SwingUtilities.invokeLater(() -> {
+                        if (rows > 0) {
+                            appendLog("Appointment booked: patientId=" + pid + ", doctorId=" + did + ", date=" + date);
+                            JOptionPane.showMessageDialog(this, "Appointment booked successfully.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                            loadAppointments();
+                        } else {
+                            appendLog("Failed to book appointment.");
+                            JOptionPane.showMessageDialog(this, "Failed to book appointment.", "Error", JOptionPane.ERROR_MESSAGE);
+                        }
+                    });
+                }
+            } catch (SQLException ex) {
+                SwingUtilities.invokeLater(() -> {
+                    appendLog("Error booking appointment: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(this, "Error booking appointment:\n" + ex.getMessage(), "DB Error", JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        });
+    }
+
+    private boolean existsInTable(String tableName, int id) throws SQLException {
+        String q = "SELECT COUNT(*) FROM " + tableName + " WHERE id = ?";
+        try (PreparedStatement ps = connection.prepareStatement(q)) {
+            ps.setInt(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isDoctorAvailable(int doctorId, String appointmentDate) throws SQLException {
+        String q = "SELECT COUNT(*) FROM appointments WHERE doctor_id = ? AND appointment_date = ?";
+        try (PreparedStatement ps = connection.prepareStatement(q)) {
+            ps.setInt(1, doctorId);
+            ps.setString(2, appointmentDate);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1) == 0;
+                }
+            }
+        }
+        return false;
+    }
+
+    private DefaultTableModel resultSetToTableModel(ResultSet rs) throws SQLException {
+        ResultSetMetaData meta = rs.getMetaData();
+        int colCount = meta.getColumnCount();
+
+        Vector<String> columnNames = new Vector<>();
+        for (int i = 1; i <= colCount; i++) {
+            columnNames.add(meta.getColumnLabel(i));
+        }
+
+        Vector<Vector<Object>> data = new Vector<>();
+        while (rs.next()) {
+            Vector<Object> row = new Vector<>();
+            for (int i = 1; i <= colCount; i++) {
+                row.add(rs.getObject(i));
+            }
+            data.add(row);
+        }
+
+        return new DefaultTableModel(data, columnNames) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false; // read-only table
+            }
+        };
+    }
+
+    private void appendLog(String message) {
+        SwingUtilities.invokeLater(() -> {
+            logArea.append(message + "\n");
+            logArea.setCaretPosition(logArea.getDocument().getLength());
+        });
+    }
+
+    private void shutdown() {
+        appendLog("Shutting down executor and closing DB connection...");
+        dbExecutor.shutdownNow();
+        try {
+            if (connection != null && !connection.isClosed()) {
+                connection.close();
+                appendLog("DB connection closed.");
+            }
+        } catch (SQLException e) {
+            appendLog("Error closing DB connection: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Launch GUI on EDT
+        SwingUtilities.invokeLater(() -> new HospitalManagementGUI());
+    }
+}
